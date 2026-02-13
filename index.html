@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Big Picture Policies: Long-Context Robot Imitation Learning</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Chart.js for interactive charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ============================================
+     1. Hero
+     ============================================ -->
+<section class="hero">
+    <h1 class="hero-title">Long-Context Robot Imitation Learning by Focusing on Key History Frames</h1>
+    <div class="hero-authors" id="authorList">
+        <span class="author">Max Sobol Mark<sup>1,2</sup></span>
+        <span class="author">Jacky Liang<sup>1</sup></span>
+        <span class="author">Maria Attarian<sup>1</sup></span>
+        <span class="author">Chuyuan Fu<sup>1</sup></span>
+        <span class="author">Debidatta Dwibedi<sup>1</sup></span>
+        <span class="author senior-author" id="seniorAuthor1">Aviral Kumar<sup>1,2,<span class="tooltip-trigger">*<span class="tooltip">Equal advising</span></span></sup></span>
+        <span class="author senior-author" id="seniorAuthor2">Dhruv Shah<sup>1,3,<span class="tooltip-trigger">*<span class="tooltip">Equal advising</span></span></sup></span>
+    </div>
+    <p class="hero-affiliations">
+        <sup>1</sup>Google DeepMind &nbsp; <sup>2</sup>Carnegie Mellon University &nbsp; <sup>3</sup>Princeton University
+    </p>
+
+    <div class="hero-links">
+        <a href="#" class="hero-link hero-link-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            arXiv
+        </a>
+    </div>
+
+    <div class="hero-video-wrap">
+        <video autoplay muted loop controls preload="metadata" playsinline>
+            <source src="BPPPresentation.mp4" type="video/mp4">
+        </video>
+    </div>
+</section>
+
+<!-- ============================================
+     2. Abstract
+     ============================================ -->
+<section class="section section-alt" id="abstract">
+    <div class="container">
+        <h2 class="section-title">Abstract</h2>
+        <div class="abstract-content">
+            <p>Many useful robot tasks require attending to the history of past observations. For example, finding an item in a room requires remembering which places have already been searched. However, the best-performing robot policies typically condition only on the current observation, limiting their applicability to such tasks.</p>
+            <p>Na&iuml;vely conditioning on past observations often fails due to spurious correlations: policies latch onto incidental features of training histories that do not generalize to out-of-distribution trajectories upon deployment.</p>
+            <p>In this paper, we analyze why policies latch onto these spurious correlations. We find that this problem arises because of limited coverage over the space of possible histories during training, which grows exponentially with horizon. Existing regularization techniques provide inconsistent benefits across tasks, as they do not fundamentally address this coverage problem.</p>
+            <p>Motivated by these findings, we propose <strong>Big Picture Policies (BPP)</strong>, an approach that conditions on a minimal set of meaningful keyframes detected by a vision-language model. By projecting diverse rollouts onto a compact representation of task-relevant events, BPP substantially reduces distribution shift between training and deployment, without sacrificing expressivity. We evaluate BPP on four challenging real-world manipulation tasks and three simulation tasks, all requiring history conditioning. BPP achieves <strong>70% higher success rates</strong> than the best comparison on real-world evaluations.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================
+     3. Problem Motivation
+     ============================================ -->
+<section class="section" id="problem">
+    <div class="container">
+        <h2 class="section-title">Naive History Conditioning Fails</h2>
+        <p class="problem-text">
+            Conditioning policies on subsampled past observations seems natural, but it leads to failures across diverse tasks.
+            Policies latch onto spurious correlations in training histories that do not generalize to out-of-distribution rollouts at deployment time.
+        </p>
+
+        <div class="failure-grid fade-in">
+            <div class="failure-item">
+                <video muted loop playsinline preload="metadata" class="autoplay-video">
+                    <source src="videos/drawer_naive_history_failure_filmstrip/drawer_naive_history_failure_overhead.mp4" type="video/mp4">
+                </video>
+                <div class="video-caption">Drawer Search</div>
+            </div>
+            <div class="failure-item">
+                <video muted loop playsinline preload="metadata" class="autoplay-video">
+                    <source src="videos/marshmallow_naive_history_failure_filmstrip/marshmallow_naive_history_failure_overhead.mp4" type="video/mp4">
+                </video>
+                <div class="video-caption">Marshmallows</div>
+            </div>
+            <div class="failure-item">
+                <video muted loop playsinline preload="metadata" class="autoplay-video">
+                    <source src="videos/mug_naive_history_failure_filmstrip/mug_replacement_naive_history_200_demos_fail.mp4" type="video/mp4">
+                </video>
+                <div class="video-caption">Mug Replacement</div>
+            </div>
+            <div class="failure-item">
+                <video muted loop playsinline preload="metadata" class="autoplay-video">
+                    <source src="videos/stacking_puzzle_naive_history_failure_filmstrip/puzzle_naive_overhead.mp4" type="video/mp4">
+                </video>
+                <div class="video-caption">Stacking Puzzle</div>
+            </div>
+        </div>
+
+        <p class="problem-text fade-in">
+            We ran experiments in simulation to understand why this happens. We probe <strong>how well policies understand the current history state</strong> (by training a separate head that predicts history state with a stop-gradient, and comparing accuracies). We find that methods that condition on subsampled past histories <strong>accurately predict history state</strong> in unseen but <strong>in-distribution</strong> trajectories, but <strong>fail</strong> on trajectories from their own policy's rollouts, which are slightly <strong>out-of-distribution</strong>.
+        </p>
+
+        <div class="figure-wrap fade-in">
+            <img src="figures/state_prediction_averaged.png" alt="State prediction accuracy degrades on policy rollouts" loading="lazy">
+            <p class="figure-caption">History understanding degrades on policy rollouts (out-of-distribution).</p>
+        </div>
+
+        <p class="problem-text fade-in">
+            Regularizations like Past Token Prediction (PTP) can help, but the problem persists, both in history understanding and evaluation performance (see results below).
+        </p>
+
+        <div class="takeaway-box fade-in">
+            <p>Regularization does not fix lack of coverage over possible histories.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================
+     4. Scroll-Driven Animation
+     ============================================ -->
+<section class="scroll-section" id="scroll-demo">
+    <div class="scroll-container">
+        <div class="scroll-sticky">
+            <!-- Section header -->
+            <div class="scroll-section-header" id="scrollSectionHeader">
+                <h2 class="scroll-section-title">How can we get around <strong>lack of coverage</strong> of histories?</h2>
+            </div>
+
+            <!-- Loading overlay -->
+            <div class="scroll-loading" id="scrollLoading">
+                <div class="scroll-loading-text" id="scrollLoadingText">Loading frames...</div>
+                <div class="scroll-loading-bar">
+                    <div class="scroll-loading-fill" id="scrollLoadingFill"></div>
+                </div>
+            </div>
+
+            <!-- Overhead video canvas -->
+            <div class="scroll-overhead-wrap">
+                <canvas id="scrollOverheadCanvas"></canvas>
+            </div>
+
+            <!-- Trajectory time slider (shows video time, not interactive) -->
+            <div class="trajectory-slider-container" id="trajectorySliderContainer">
+                <div class="trajectory-slider-track">
+                    <div class="trajectory-slider-progress" id="trajectorySliderProgress"></div>
+                    <div class="trajectory-slider-thumb" id="trajectorySliderThumb">
+                        <!-- Flexed Robot Arm SVG -->
+                        <svg viewBox="0 0 44 52" class="robot-arm-icon">
+                            <defs>
+                                <linearGradient id="armGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#4a5568"/>
+                                    <stop offset="50%" style="stop-color:#718096"/>
+                                    <stop offset="100%" style="stop-color:#4a5568"/>
+                                </linearGradient>
+                                <linearGradient id="jointGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#60a5fa"/>
+                                    <stop offset="100%" style="stop-color:#3b82f6"/>
+                                </linearGradient>
+                            </defs>
+                            <!-- Base/mount -->
+                            <rect x="2" y="46" width="12" height="6" rx="1.5" fill="#2d3748"/>
+                            <rect x="0" y="44" width="16" height="3" rx="1" fill="#4a5568"/>
+                            <!-- Upper arm (almost vertical from shoulder to elbow) -->
+                            <path d="M5 42 L7 22 L13 22 L11 42 Z" fill="url(#armGradient)"/>
+                            <!-- Shoulder joint -->
+                            <circle cx="8" cy="44" r="5" fill="url(#jointGradient)"/>
+                            <circle cx="8" cy="44" r="2.5" fill="#1e3a5f"/>
+                            <!-- Forearm (angled from elbow to wrist) -->
+                            <path d="M8 19 L30 10 L32 15 L10 24 Z" fill="url(#armGradient)"/>
+                            <!-- Elbow joint -->
+                            <circle cx="10" cy="22" r="4.5" fill="url(#jointGradient)"/>
+                            <circle cx="10" cy="22" r="2.2" fill="#1e3a5f"/>
+                            <!-- Wrist joint -->
+                            <circle cx="31" cy="13" r="3.5" fill="url(#jointGradient)"/>
+                            <circle cx="31" cy="13" r="1.7" fill="#1e3a5f"/>
+                            <!-- Gripper base -->
+                            <rect x="32" y="9" width="5" height="8" rx="1" fill="#4a5568"/>
+                            <!-- Gripper fingers (half closed) -->
+                            <path d="M37 9 L40 7 L41 9 L38 10 Z" fill="#60a5fa"/>
+                            <path d="M37 17 L40 19 L41 17 L38 16 Z" fill="#60a5fa"/>
+                            <!-- Gripper tips -->
+                            <circle cx="40.5" cy="8" r="1.3" fill="#3b82f6"/>
+                            <circle cx="40.5" cy="18" r="1.3" fill="#3b82f6"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Frame strips wrapper -->
+            <div class="frame-strips-wrapper" id="frameStripsWrapper">
+                <!-- BPP frame strip (hidden initially via CSS, appears above naive) -->
+                <div id="scrollBppContainer">
+                    <div class="scroll-strip-label bpp-label" id="scrollBppLabel">Big Picture Policies (Ours)</div>
+                    <div class="scroll-frame-strip scroll-strip-bpp" id="scrollBppStrip"></div>
+                </div>
+
+                <!-- Naive frame strip -->
+                <div id="scrollNaiveContainer">
+                    <div class="scroll-strip-label naive-label" id="scrollNaiveLabel">Naive History Conditioning</div>
+                    <div class="scroll-frame-strip scroll-strip-naive" id="scrollNaiveStrip"></div>
+                    <!-- Highlight box for policy inputs -->
+                    <div class="policy-input-highlight" id="policyInputHighlight">
+                        <div class="policy-input-label">Inputs that the policy sees</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages -->
+            <div class="scroll-message" id="scrollMsg1">
+                Task: Insert two handfuls of marshmallows into the bowl, then press the red button.
+            </div>
+            <div class="scroll-message" id="scrollMsg2">
+                Naive history conditioning yields complex inputs, with ample opportunities to go out-of-distribution (e.g. failed grasps).
+            </div>
+            <div class="scroll-message" id="scrollMsg3">
+                What if instead of looking at raw subsampled histories, we looked at the <em>bigger picture</em>?
+            </div>
+            <div class="scroll-message" id="scrollMsg4">
+                BPP projects trajectories onto a compact representation of task-relevant events, so policy inputs look more in-distribution.
+            </div>
+
+            <!-- BPP title overlay -->
+            <div class="scroll-bpp-title" id="scrollBppTitle">Big Picture Policies (BPP)</div>
+
+            <!-- Animation controls (at bottom) -->
+            <div class="animation-controls" id="animationControls">
+                <button class="play-pause-btn" id="playPauseBtn" title="Play/Pause">
+                    <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="5,3 19,12 5,21"/>
+                    </svg>
+                    <svg class="pause-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="5" y="3" width="4" height="18"/>
+                        <rect x="15" y="3" width="4" height="18"/>
+                    </svg>
+                </button>
+                <div class="animation-slider-track" id="animationSliderTrack">
+                    <div class="animation-slider-progress" id="animationSliderProgress"></div>
+                    <div class="animation-slider-thumb" id="animationSliderThumb"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================
+     5. Method
+     ============================================ -->
+<section class="section" id="method">
+    <div class="container">
+        <h2 class="section-title">Big Picture Policies (BPP) learns keyframe-conditioned policies</h2>
+        <p class="method-text">
+            The key part of <strong>BPP</strong> is that we train policies that are conditioned on a few behaviorally salient events, instead of raw histories. These salient events are detected by a VLM with a task-specific criterion and very simple prompting. For example, for the Drawer Search task, we ask the VLM "has a drawer just been opened?". A schematic of the BPP pipeline is shown below.
+        </p>
+
+        <div class="figure-wrap figure-wide fade-in">
+            <img src="figures/keyframes_figure_crop.png" alt="BPP method schematic showing keyframe detection pipeline" loading="lazy">
+        </div>
+
+        <p class="method-text fade-in">
+            To account for VLM response latency, during training we mask-out keyframes that were detected in the last 3 seconds.
+        </p>
+    </div>
+</section>
+
+<!-- ============================================
+     6. Results
+     ============================================ -->
+<section class="section section-alt" id="results">
+    <div class="container">
+        <h2 class="section-title">Results</h2>
+        <p class="section-subtitle">BPP achieves the highest success rates across all four real-world manipulation tasks.</p>
+
+        <div class="results-table-wrap fade-in">
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Current Obs</th>
+                        <th>Naive History</th>
+                        <th>PTP</th>
+                        <th class="highlight-col">BPP (Ours)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Drawer Search</td>
+                        <td>11.1%</td>
+                        <td>0.0%</td>
+                        <td>0.0%</td>
+                        <td class="highlight-col"><strong>33.3%</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Marshmallows</td>
+                        <td>40.0%</td>
+                        <td>25.0%</td>
+                        <td>35.0%</td>
+                        <td class="highlight-col"><strong>65.0%</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Mug Replacement</td>
+                        <td>0.0%</td>
+                        <td>5.0%</td>
+                        <td>40.0%</td>
+                        <td class="highlight-col"><strong>60.0%</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Stacking Puzzle</td>
+                        <td>6.5%</td>
+                        <td>21.0%</td>
+                        <td>52.0%</td>
+                        <td class="highlight-col"><strong>56.0%</strong></td>
+                    </tr>
+                    <tr class="avg-row">
+                        <td><strong>Average</strong></td>
+                        <td>14.4%</td>
+                        <td>12.8%</td>
+                        <td>31.8%</td>
+                        <td class="highlight-col"><strong>53.6%</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="interactive-chart-wrap fade-in" id="simResultsChartWrap">
+            <canvas id="simResultsChart"></canvas>
+            <p class="figure-caption">BPP also outperforms baselines on simulation tasks requiring history conditioning. Hover over bars to see values.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================
+     7. Videos by Environment
+     ============================================ -->
+<section class="section" id="videos">
+    <div class="container">
+        <h2 class="section-title">BPP shows robust history understanding and long-horizon behaviors</h2>
+        <p class="section-subtitle">Side-by-side comparisons across methods for each real-world task.</p>
+
+        <!-- Drawer Search -->
+        <div class="env-section fade-in">
+            <h3 class="env-title">Drawer Search</h3>
+            <div class="video-row">
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/drawer_current_obs_failure_filmstrip/drawer_current_obs_only_failure_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Current Obs <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/drawer_naive_history_failure_filmstrip/drawer_naive_history_failure_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Naive History <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/drawer_ptp_failure_filmstrip/drawer_ptp_failure_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">PTP <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card success">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/drawer_keyframes_success_long_horizon_filmstrip/drawer_keyframes_long_horizon_success_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">BPP (Ours) <span class="badge-success">Success</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Marshmallows -->
+        <div class="env-section fade-in">
+            <h3 class="env-title">Marshmallows</h3>
+            <div class="video-row">
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/marshmallow_current_obs_failure_filmstrip/marshmallow_current_obs_only_failure2_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Current Obs <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/marshmallow_naive_history_failure_filmstrip/marshmallow_naive_history_failure_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Naive History <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card success">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/marshmallow_keyframes_success_filmstrip/marshmallow_keyframes_success_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">BPP (Ours) <span class="badge-success">Success</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mug Replacement -->
+        <div class="env-section fade-in">
+            <h3 class="env-title">Mug Replacement</h3>
+            <div class="video-row">
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/mug_naive_history_failure_filmstrip/mug_replacement_naive_history_200_demos_fail.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Naive History <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card success">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/mug_keyframes_success_filmstrip/mug_vlm_keyframes_success.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">BPP (Ours) <span class="badge-success">Success</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stacking Puzzle -->
+        <div class="env-section fade-in">
+            <h3 class="env-title">Stacking Puzzle</h3>
+            <div class="video-row">
+                <div class="video-card failure">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/stacking_puzzle_naive_history_failure_filmstrip/puzzle_naive_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">Naive History <span class="badge-failure">Fail</span></div>
+                </div>
+                <div class="video-card success">
+                    <video muted loop playsinline preload="metadata" class="autoplay-video">
+                        <source src="videos/stacking_puzzle_keyframes_success_filmstrip/puzzle_keyframes_overhead.mp4" type="video/mp4">
+                    </video>
+                    <div class="video-label">BPP (Ours) <span class="badge-success">Success</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================
+     8. Citation
+     ============================================ -->
+<section class="section section-alt" id="citation">
+    <div class="container">
+        <h2 class="section-title">Citation</h2>
+        <div class="citation-box">
+            <button class="copy-btn" onclick="copyCitation(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                Copy
+            </button>
+            <pre><code>@article{sobolmark2026bpp,
+  title={Long-Context Robot Imitation Learning by Focusing on Key History Frames},
+  author={Sobol Mark, Max and Liang, Jacky and Attarian, Maria and Fu, Chuyuan and Dwibedi, Debidatta and Kumar, Aviral and Shah, Dhruv},
+  journal={arXiv preprint},
+  year={2026}
+}</code></pre>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+    <p>Big Picture Policies (BPP)</p>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
